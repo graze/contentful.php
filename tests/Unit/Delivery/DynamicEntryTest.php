@@ -16,6 +16,8 @@ use Contentful\Delivery\Locale;
 use Contentful\Delivery\Space;
 use Contentful\Delivery\SystemProperties;
 use Contentful\Exception\ResourceNotFoundException;
+use GuzzleHttp\Exception\ClientException;
+use GuzzleHttp\Psr7\Request;
 
 class DynamicEntryTest extends \PHPUnit_Framework_TestCase
 {
@@ -299,7 +301,7 @@ class DynamicEntryTest extends \PHPUnit_Framework_TestCase
                     return $crookshanksEntry;
                 }
 
-                return new ResourceNotFoundException;
+                return new ResourceNotFoundException('abc', new ClientException('abc', new Request('GET', '')));
             });
 
 

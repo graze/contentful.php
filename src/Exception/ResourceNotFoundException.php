@@ -11,6 +11,6 @@ namespace Contentful\Exception;
  *
  * @api
  */
-class ResourceNotFoundException extends \RuntimeException
+class ResourceNotFoundException extends RequestException
 {
 }

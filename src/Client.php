@@ -112,33 +112,27 @@ abstract class Client
      */
     private function doRequest(RequestInterface $request, array $options)
     {
+        $exceptionMap = [
+            'InvalidQuery' => InvalidQueryException::class, // 400
+            'AccessTokenInvalid' => AccessTokenInvalidException::class, // 401
+            'NotFound' => ResourceNotFoundException::class, // 404
+            'RateLimitExceeded' => RateLimitExceededException::class // 429
+        ];
+
         try {
             return $this->httpClient->send($request, $options);
         } catch (ClientException $e) {
-            $response = $e->getResponse();
-            if ($response->getStatusCode() === 404) {
-                $result = self::decodeJson($response->getBody());
-                throw new ResourceNotFoundException($result['message'], 0, $e);
+            if (!$e->hasResponse()) {
+                throw $e;
             }
-            if ($response->getStatusCode() === 429) {
-                $result = self::decodeJson($response->getBody());
-                $rateLimitReset = (int) $response->getHeader('X-Contentful-RateLimit-Reset')[0];
-                throw new RateLimitExceededException($result['message'], 0, $e, $rateLimitReset);
-            }
-            if ($response->getStatusCode() === 400) {
-                $result = self::decodeJson($response->getBody());
-                if ($result['sys']['id'] === 'InvalidQuery') {
-                    throw new InvalidQueryException($result['message'], 0, $e);
-                }
-            }
-            if ($response->getStatusCode() === 401) {
-                $result = self::decodeJson($response->getBody());
-                if ($result['sys']['id'] === 'AccessTokenInvalid') {
-                    throw new AccessTokenInvalidException($result['message'], 0, $e);
-                }
+            $data = self::decodeJson($e->getResponse()->getBody());
+            $errorId = $data['sys']['id'];
+
+            if (!isset($exceptionMap[$errorId])) {
+                throw $e;
             }
 
-            throw $e;
+            throw new $exceptionMap[$errorId]($data['message'], $e);
         }
     }
 

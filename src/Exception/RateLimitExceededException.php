@@ -6,6 +6,8 @@
 
 namespace Contentful\Exception;
 
+use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
+
 /**
  * A RateLimitExceededException is thrown when there have been too many requests.
  *
@@ -14,7 +16,7 @@ namespace Contentful\Exception;
  *
  * @api
  */
-class RateLimitExceededException extends \RuntimeException
+class RateLimitExceededException extends RequestException
 {
     /**
      * @var int|null
@@ -24,14 +26,14 @@ class RateLimitExceededException extends \RuntimeException
     /**
      * RateLimitExceededException constructor.
      *
-     * @param string          $message
-     * @param int             $code
-     * @param \Exception|null  $previous
-     * @param int|null        $rateLimitReset
+     * @param string                       $message
+     * @param GuzzleRequestException|null  $previous
      */
-    public function __construct($message = "", $code = 0, \Exception $previous = null, $rateLimitReset = null)
+    public function __construct($message = "", GuzzleRequestException $previous = null)
     {
-        parent::__construct($message, $code, $previous);
+        parent::__construct($message, $previous);
+
+        $rateLimitReset = (int) $previous->getResponse()->getHeader('X-Contentful-RateLimit-Reset')[0];
 
         $this->rateLimitReset = $rateLimitReset;
     }
