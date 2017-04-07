@@ -6,6 +6,7 @@
 
 namespace Contentful;
 
+use Contentful\Exception\ForbiddenException;
 use Contentful\Log\NullLogger;
 use Contentful\Log\StandardTimer;
 use Contentful\Exception\NotFoundException;
@@ -140,6 +141,12 @@ abstract class Client
                 $result = self::decodeJson($response->getBody());
                 if ($result['sys']['id'] === 'InvalidQuery') {
                     throw new InvalidQueryException($result['message'], 0, $e);
+                }
+            }
+            if ($response->getStatusCode() === 403) {
+                $result = self::decodeJson($response->getBody());
+                if ($result['sys']['id'] === 'Forbidden') {
+                    throw new ForbiddenException($result['message'], 0, $e);
                 }
             }
             if ($response->getStatusCode() === 401) {
