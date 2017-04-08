@@ -74,7 +74,7 @@ abstract class Client
      * @param string $path
      * @param array  $options
      *
-     * @return array
+     * @return array|null
      */
     protected function request($method, $path, array $options = [])
     {
@@ -102,7 +102,11 @@ abstract class Client
         $response = null;
         try {
             $response = $this->doRequest($request, $options);
-            $result = self::decodeJson($response->getBody());
+            if ($response->getStatusCode() === 204) {
+                $result = null;
+            } else {
+                $result = self::decodeJson($response->getBody());
+            }
         } catch (\Exception $e) {
             $timer->stop();
             $this->logger->log($this->api, $request, $timer, $response, $e);
