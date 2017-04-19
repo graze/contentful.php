@@ -8,7 +8,7 @@ namespace Contentful;
 
 use Contentful\Log\NullLogger;
 use Contentful\Log\StandardTimer;
-use Contentful\Exception\ResourceNotFoundException;
+use Contentful\Exception\NotFoundException;
 use Contentful\Exception\RateLimitExceededException;
 use Contentful\Exception\InvalidQueryException;
 use Contentful\Exception\AccessTokenInvalidException;
@@ -17,6 +17,7 @@ use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\Exception\ClientException;
 use Contentful\Log\LoggerInterface;
 use GuzzleHttp\Psr7;
+use Psr\Http\Message\RequestInterface;
 
 /**
  * Abstract client for common code for the different clients.
@@ -89,7 +90,7 @@ abstract class Client
         $response = null;
         try {
             $response = $this->doRequest($request, $options);
-            $result = $this->decodeJson($response->getBody());
+            $result = self::decodeJson($response->getBody());
         } catch (\Exception $e) {
             $timer->stop();
             $this->logger->log($this->api, $request, $timer, $response, $e);
@@ -103,27 +104,35 @@ abstract class Client
         return $result;
     }
 
-    private function doRequest($request, $options)
+    /**
+     * @param  RequestInterface $request
+     * @param  array            $options
+     *
+     * @return \Psr\Http\Message\ResponseInterface|null
+     */
+    private function doRequest(RequestInterface $request, array $options)
     {
         try {
             return $this->httpClient->send($request, $options);
         } catch (ClientException $e) {
             $response = $e->getResponse();
             if ($response->getStatusCode() === 404) {
-                $result = $this->decodeJson($response->getBody());
-                throw new ResourceNotFoundException($result['message'], 0, $e);
+                $result = self::decodeJson($response->getBody());
+                throw new NotFoundException($result['message'], 0, $e);
             }
             if ($response->getStatusCode() === 429) {
-                throw new RateLimitExceededException(null, 0, $e);
+                $result = self::decodeJson($response->getBody());
+                $rateLimitReset = (int) $response->getHeader('X-Contentful-RateLimit-Reset')[0];
+                throw new RateLimitExceededException($result['message'], 0, $e, $rateLimitReset);
             }
             if ($response->getStatusCode() === 400) {
-                $result = $this->decodeJson($response->getBody());
+                $result = self::decodeJson($response->getBody());
                 if ($result['sys']['id'] === 'InvalidQuery') {
                     throw new InvalidQueryException($result['message'], 0, $e);
                 }
             }
             if ($response->getStatusCode() === 401) {
-                $result = $this->decodeJson($response->getBody());
+                $result = self::decodeJson($response->getBody());
                 if ($result['sys']['id'] === 'AccessTokenInvalid') {
                     throw new AccessTokenInvalidException($result['message'], 0, $e);
                 }
@@ -164,7 +173,7 @@ abstract class Client
 
         return new Psr7\Request($method, $uri, [
             'User-Agent' => $this->getUserAgent(),
-            'Content-Type' => $contentTypes[$this->api],
+            'Accept' => $contentTypes[$this->api],
             'Accept-Encoding' => 'gzip',
             'Authorization' => 'Bearer ' . $this->token,
         ], null);
@@ -199,8 +208,10 @@ abstract class Client
      * @return array
      *
      * @throws \RuntimeException On invalid JSON
+     *
+     * @internal
      */
-    protected function decodeJson($json)
+    public static function decodeJson($json)
     {
         $result = json_decode($json, true);
         if ($result === null) {

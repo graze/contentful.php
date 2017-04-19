@@ -6,7 +6,8 @@
 
 namespace Contentful\Delivery;
 
-use Contentful\Exception\ResourceNotFoundException;
+use Contentful\Exception\NotFoundException;
+use Contentful\Link;
 
 class DynamicEntry extends LocalizedResource implements EntryInterface
 {
@@ -26,7 +27,7 @@ class DynamicEntry extends LocalizedResource implements EntryInterface
     protected $sys;
 
     /**
-     * @var Client
+     * @var Client|null
      */
     protected $client;
 
@@ -88,7 +89,6 @@ class DynamicEntry extends LocalizedResource implements EntryInterface
         if (0 !== strpos($name, 'get')) {
             trigger_error('Call to undefined method ' . __CLASS__ . '::' . $name . '()', E_USER_ERROR);
         }
-        $client = $this->client;
         $locale = $this->getLocaleFromInput(isset($arguments[0]) ? $arguments[0] : null);
 
         $fieldName = substr($name, 3);
@@ -141,15 +141,7 @@ class DynamicEntry extends LocalizedResource implements EntryInterface
         }
 
         if ($result instanceof Link) {
-            $cacheId = $result->getLinkType() . '-' . $result->getId();
-            if (isset($this->resolvedLinks[$cacheId])) {
-                return $this->resolvedLinks[$cacheId];
-            }
-
-            $resolvedObj = $client->resolveLink($result);
-            $this->resolvedLinks[$cacheId] = $resolvedObj;
-
-            return $resolvedObj;
+            return $this->resolveLinkWithCache($result);
         }
 
         if ($fieldConfig->getType() === 'Array' && $fieldConfig->getItemsType() === 'Link') {
@@ -165,6 +157,31 @@ class DynamicEntry extends LocalizedResource implements EntryInterface
         return $result;
     }
 
+    /**
+     * Resolves a Link into an Entry or Asset. Resolved links are cached local to the object.
+     *
+     * @param  Link $link
+     *
+     * @return Asset|EntryInterface|null
+     */
+    private function resolveLinkWithCache(Link $link)
+    {
+        $cacheId = $link->getLinkType() . '-' . $link->getId();
+        if (isset($this->resolvedLinks[$cacheId])) {
+            return $this->resolvedLinks[$cacheId];
+        }
+
+        $resolvedObj = $this->client->resolveLink($link);
+        $this->resolvedLinks[$cacheId] = $resolvedObj;
+
+        return $resolvedObj;
+    }
+
+    /**
+     * @param  string $fieldName
+     *
+     * @return ContentTypeField|null
+     */
     private function getFieldConfigForName($fieldName)
     {
         // Let's try the lower case version first, it's the more common one
@@ -186,8 +203,8 @@ class DynamicEntry extends LocalizedResource implements EntryInterface
     {
         if ($value instanceof Link) {
             try {
-                return $this->client->resolveLink($value);
-            } catch (ResourceNotFoundException $e) {
+                return $this->resolveLinkWithCache($value);
+            } catch (NotFoundException $e) {
                 return $e;
             }
         }
@@ -205,6 +222,13 @@ class DynamicEntry extends LocalizedResource implements EntryInterface
         return $value->getId();
     }
 
+    /**
+     * @param  mixed $value
+     * @param  string $type
+     * @param  string $linkType
+     *
+     * @return mixed
+     */
     private function formatSimpleValueForJson($value, $type, $linkType)
     {
         switch ($type) {
@@ -231,6 +255,12 @@ class DynamicEntry extends LocalizedResource implements EntryInterface
         }
     }
 
+    /**
+     * @param  mixed $value
+     * @param  ContentTypeField $fieldConfig
+     *
+     * @return mixed
+     */
     private function formatValueForJson($value, ContentTypeField $fieldConfig)
     {
         $type = $fieldConfig->getType();

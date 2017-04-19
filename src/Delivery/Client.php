@@ -7,8 +7,11 @@
 namespace Contentful\Delivery;
 
 use Contentful\Client as BaseClient;
+use Contentful\Delivery\Cache\FilesystemCache;
+use Contentful\Delivery\Cache\NullCache;
+use Contentful\Delivery\Cache\InstanceCache;
 use Contentful\Delivery\Synchronization\Manager;
-use Contentful\Query as BaseQuery;
+use Contentful\Link;
 
 /**
  * A Client is used to communicate the Contentful Delivery API.
@@ -21,7 +24,7 @@ use Contentful\Query as BaseQuery;
  */
 class Client extends BaseClient
 {
-    const VERSION = '0.7.0-dev';
+    const VERSION = '0.9.0-dev';
 
     /**
      * @var ResourceBuilder
@@ -44,6 +47,11 @@ class Client extends BaseClient
     private $defaultLocale;
 
     /**
+     * @var \Contentful\Delivery\Cache\CacheInterface
+     */
+    private $cacheManager;
+
+    /**
      * Client constructor.
      *
      * @param string                $token         Delivery API Access Token for the space used with this Client
@@ -56,6 +64,7 @@ class Client extends BaseClient
      *                                              * guzzle      Override the guzzle instance used by the Contentful client
      *                                              * logger      Inject a Contentful logger
      *                                              * uriOverride Override the uri that is used to connect to the Contentful API (e.g. 'https://cdn.contentful.com/'). The trailing slash is required.
+     *                                              * cacheDir    Path to the cache directory to be used to read metadata. The client never writes to the cache, use the CLI to warm up the cache.
      *
      * @api
      */
@@ -68,24 +77,25 @@ class Client extends BaseClient
             'guzzle' => null,
             'logger' => null,
             'uriOverride' => null,
+            'cacheDir' => null
         ], $options);
 
         $guzzle = $options['guzzle'];
         $logger = $options['logger'];
         $uriOverride = $options['uriOverride'];
+        $cacheDir = $options['cacheDir'];
 
         if ($uriOverride !== null) {
             $baseUri = $uriOverride;
         }
         $baseUri .= 'spaces/';
 
-        $instanceCache = new InstanceCache;
-
         parent::__construct($token, $baseUri . $spaceId . '/', $api, $logger, $guzzle);
 
         $this->preview = $preview;
-        $this->instanceCache = $instanceCache;
-        $this->builder = new ResourceBuilder($this, $instanceCache, $spaceId);
+        $this->instanceCache = new InstanceCache;
+        $this->cacheManager = $cacheDir === null ? new NullCache : new FilesystemCache($cacheDir, $spaceId);
+        $this->builder = new ResourceBuilder($this, $this->instanceCache, $this->cacheManager, $spaceId);
         $this->defaultLocale = $defaultLocale;
     }
 
@@ -116,15 +126,15 @@ class Client extends BaseClient
     }
 
     /**
-     * @param  BaseQuery|null $query
+     * @param  Query|null $query
      *
      * @return \Contentful\ResourceArray
      *
      * @api
      */
-    public function getAssets(BaseQuery $query = null)
+    public function getAssets(Query $query = null)
     {
-        $query = $query !== null ? $query : new BaseQuery;
+        $query = $query !== null ? $query : new Query;
         $queryData = $query->getQueryData();
         if (!isset($queryData['locale'])) {
             $queryData['locale'] = $this->defaultLocale;
@@ -148,19 +158,24 @@ class Client extends BaseClient
             return $this->instanceCache->getContentType($id);
         }
 
+        $cache = $this->cacheManager->readContentType($id);
+        if ($cache !== null) {
+            return $this->reviveJson($cache);
+        }
+
         return $this->requestAndBuild('GET', 'content_types/' . $id);
     }
 
     /**
-     * @param  BaseQuery|null $query
+     * @param  Query|null $query
      *
      * @return \Contentful\ResourceArray
      *
      * @api
      */
-    public function getContentTypes(BaseQuery $query = null)
+    public function getContentTypes(Query $query = null)
     {
-        $query = $query !== null ? $query : new BaseQuery;
+        $query = $query !== null ? $query : new Query;
         return $this->requestAndBuild('GET', 'content_types', [
             'query' => $query->getQueryData()
         ]);
@@ -183,15 +198,15 @@ class Client extends BaseClient
     }
 
     /**
-     * @param  BaseQuery $query
+     * @param  Query $query
      *
      * @return \Contentful\ResourceArray
      *
      * @api
      */
-    public function getEntries(BaseQuery $query = null)
+    public function getEntries(Query $query = null)
     {
-        $query = $query !== null ? $query : new BaseQuery;
+        $query = $query !== null ? $query : new Query;
         $queryData = $query->getQueryData();
         if (!isset($queryData['locale'])) {
             $queryData['locale'] = $this->defaultLocale;
@@ -211,6 +226,11 @@ class Client extends BaseClient
     {
         if ($this->instanceCache->hasSpace()) {
             return $this->instanceCache->getSpace();
+        }
+
+        $cache = $this->cacheManager->readSpace();
+        if ($cache !== null) {
+            return $this->reviveJson($cache);
         }
 
         return $this->requestAndBuild('GET', '');
@@ -255,7 +275,7 @@ class Client extends BaseClient
      */
     public function reviveJson($json)
     {
-        $data = $this->decodeJson($json);
+        $data = self::decodeJson($json);
 
         return $this->builder->buildObjectsFromRawData($data);
     }
@@ -304,6 +324,13 @@ class Client extends BaseClient
         return new Manager($this, $this->builder, $this->preview);
     }
 
+    /**
+     * @param  string $method
+     * @param  string $path
+     * @param  array $options
+     *
+     * @return Asset|ContentType|DynamicEntry|Space|Synchronization\DeletedAsset|Synchronization\DeletedEntry|\Contentful\ResourceArray
+     */
     private function requestAndBuild($method, $path, array $options = [])
     {
         return $this->builder->buildObjectsFromRawData($this->request($method, $path, $options));
