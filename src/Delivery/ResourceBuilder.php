@@ -186,7 +186,7 @@ class ResourceBuilder
         $locale = $sys->getLocale();
 
         $fields = $data['fields'];
-        $files = array_map([$this, 'buildFile'], $this->normalizeFieldData($fields['file'], $locale));
+        $files = isset($fields['file']) ? array_map([$this, 'buildFile'], $this->normalizeFieldData($fields['file'], $locale)) : null;
 
         $asset = new Asset(
             isset($fields['title']) ? $this->normalizeFieldData($fields['title'], $locale) : null,
@@ -313,11 +313,7 @@ class ResourceBuilder
     {
         $result = [];
         foreach ($fields as $name => $fieldData) {
-            $fieldConfig = $contentType->getField($name);
-            if ($fieldConfig->isDisabled()) {
-                continue;
-            }
-            $result[$name] = $this->buildField($fieldConfig, $this->normalizeFieldData($fieldData, $locale), $rawDataList, $depthCount);
+            $result[$name] = $this->buildField($contentType->getField($name), $this->normalizeFieldData($fieldData, $locale), $rawDataList, $depthCount);
         }
         return $result;
     }
